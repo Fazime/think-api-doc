@@ -11,7 +11,6 @@ use ReflectionException;
 use think\facade\App;
 use think\facade\Cache;
 use think\facade\Config;
-use think\helper\Str;
 
 class ApiParser
 {
@@ -44,19 +43,25 @@ class ApiParser
 							//解析文件
 							$reflection = new ReflectionClass($class);
 							$class_comment = $reflection->getDocComment();
+							//忽略
+							if(strpos($class_comment,'@ignore'))continue;
+							//解析TAG
 							$class_tag = self::getCommentTag($class_comment);
-							if(!empty($class_tag['ignore']))continue;
-							$class_tag['uri'] = $uri;
+							$class_tag['uri'] = strtolower($uri);
 							//方法
-							$methods = $reflection->getMethods();
-							foreach ($methods AS $method) {
-								$method_tag = self::getCommentTag($method->getDocComment(), $option);
-								if(empty($method_tag['api']) || !empty($method_tag['ignore']))continue;
-								$method_name = $method->getName();
-								$method_tag['uri'] = str_replace('\\','/', $uri) . '/' . $method_name;
-								$class_tag['methods'][$method_name] = $method_tag;
+							$methods = $reflection->getMethods( \ReflectionMethod::IS_PUBLIC );
+							if($methods) {
+								foreach ($methods AS $method) {
+									$method_comment = $method->getDocComment();
+									//忽略
+									if(strpos($method_comment,'@ignore'))continue;
+									//解析
+									$method_tag = self::getCommentTag($method_comment, $option);
+									$method_name = $method->getName();
+									$method_tag && $method_tag['uri'] = strtolower(str_replace('\\','/', $uri) . '/' . $method_name);
+									$class_tag['methods'][$method_name] = $method_tag;
+								}
 							}
-							
 							$class_tags[$group][] = $class_tag;
 							
 						} catch (ReflectionException $e) {
@@ -150,26 +155,29 @@ class ApiParser
 	 */
 	protected static function getCommentTag( $comment, $option=[] )
 	{
-		$comment = preg_replace('/[ ]+/', ' ', $comment);
-		preg_match_all('/\*[\s+]?@(.*?)\s(.*?)[\n|\r]/is', $comment, $matches);
+		//忽略
+		if($comment && strpos($comment,'@ignore')) return [];
+		
+		$tags = [];
+		//匹配标签
+		preg_match('/\s\*\s+(.+?)[\n|\r]/is', $comment, $match);#标题
+		$tags['title'] = $match[1] ?? '-';
+		preg_match_all('/\s\*[\s+]?@(.*?)\s(.*?)[\n|\r]/is', $comment, $matches);
 		//dd
 		if(!empty($option['dd'])) {
-			
 			$dd = Cache::remember('maunal:dd',function(){
 				$dd = DataParser::map();
 				return $dd;
 			});
-			$ignore = ['id','uid','delete_time','create_time','update_time'];
+			$ignore = ['id','delete_time','create_time','update_time'];
 		}
 		
-		$tags = [];
 		if( !empty($matches[1]) ) {
+			//标题
 			foreach ($matches[1] AS $i => $tag_name) {
-				$line = explode(' ',$matches[2][$i] ?? '');
+				$tag_value = $matches[2][$i] ?? '';
+				$line = explode(' ', $tag_value);
 				switch ($tag_name) {
-					case 'title':
-						$tags[$tag_name] = $line[0] ?? '';
-						break;
 					case 'author':
 						$tags[$tag_name] = [
 							'name' => $line[0] ?? '',
@@ -183,11 +191,17 @@ class ApiParser
 						];
 						break;
 					case 'param':
+						
+						$name = $line[1]??'';
+						$must = !(strpos($name,'?') === 0);
+						$name = !$must ? substr($name,1) : $name;
+						
 						$tags[$tag_name][] = [
 							'type' => $line[0] ?? 'mixed',
-							'name' => $line[1] ?? '-',
+							'name' => $name,
 							'desc' => $line[2] ?? '-',
-							'must' => $line[3] ?? 0,
+							'must' => intval($must),
+							'default' => $line[3] ?? '',
 						];
 						break;
 					case 'time':
@@ -204,8 +218,8 @@ class ApiParser
 							];
 						}
 						break;
-					case 'ignore':
-						$tags[$tag_name] = 1;
+					default:
+						$tags[$tag_name] = $tag_value;
 						break;
 					
 				}
@@ -238,16 +252,13 @@ class ApiParser
 				}
 			}
 		}
-		
 		return $tags;
 	}
 	
 	public static function getDD( $database = '', $table_name = '' )
 	{
 		$cache_name = $database ? 'maunal:dd:'.$database : 'maunal:dd';
-//		$dd = Cache::remember($cache_name,function() use($database){
-		$dd = DataParser::map(['database'=>$database,'allow' => [$table_name]]);
-		return $dd;
+		return DataParser::map(['database'=>$database,'allow' => [$table_name]]);
 	}
 	
 }
