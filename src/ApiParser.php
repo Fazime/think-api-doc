@@ -11,6 +11,7 @@ use ReflectionException;
 use think\facade\App;
 use think\facade\Cache;
 use think\facade\Config;
+use think\helper\Str;
 
 class ApiParser
 {
@@ -258,7 +259,9 @@ class ApiParser
 	public static function getDD( $database = '', $table_name = '' )
 	{
 		$cache_name = $database ? 'maunal:dd:'.$database : 'maunal:dd';
-		return DataParser::map(['database'=>$database,'allow' => [$table_name]]);
+//		$dd = Cache::remember($cache_name,function() use($database){
+		$dd = DataParser::map(['database'=>$database,'allow' => [$table_name]]);
+		return $dd;
 	}
 	
 }
